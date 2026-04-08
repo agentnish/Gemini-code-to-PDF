@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gemini Code → PDF</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f0f11;
+    --surface: #18181c;
+    --surface2: #222228;
+    --border: #2e2e38;
+    --text: #f0eff4;
+    --muted: #7b7a8a;
+    --accent: #7c6af7;
+    --accent2: #4fd1c5;
+    --success: #4ade80;
+    --danger: #f87171;
+    --radius: 10px;
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+  .logo {
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .logo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .topbar-sub { font-size: 13px; color: var(--muted); margin-left: auto; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 420px 1fr;
+    flex: 1;
+    overflow: hidden;
+    height: calc(100vh - 53px);
+  }
+
+  .left {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    overflow: hidden;
+  }
+
+  .panel-title {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 14px 18px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  textarea {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    resize: none;
+    font-family: 'DM Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--text);
+    padding: 16px 18px;
+    overflow-y: auto;
+  }
+  textarea::placeholder { color: var(--muted); }
+
+  .left-footer {
+    padding: 14px 18px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0 12px;
+  }
+  .input-row label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .input-row input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    color: var(--text);
+    padding: 9px 0;
+  }
+
+  .btn-row { display: flex; gap: 8px; }
+
+  button {
+    flex: 1;
+    padding: 10px 16px;
+    border-radius: var(--radius);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+  button:active { transform: scale(0.97); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+  .btn-render {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-render:hover:not(:disabled) { opacity: 0.88; }
+
+  .btn-export {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-export:hover:not(:disabled) { border-color: var(--accent2); color: var(--accent2); }
+
+  .status {
+    font-size: 12px;
+    color: var(--muted);
+    min-height: 16px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .status.ok { color: var(--success); }
+  .status.err { color: var(--danger); }
+  .status.busy { color: var(--accent2); }
+  .spinner {
+    width: 10px; height: 10px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: none;
+  }
+  .busy .spinner { display: block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .right {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: #1a1a20;
+  }
+
+  .right-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+  .right-header span { font-size: 12px; color: var(--muted); }
+  .pill {
+    font-size: 11px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 2px 8px;
+    border-radius: 20px;
+    margin-left: auto;
+  }
+
+  .preview-wrap {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  #page-canvas {
+    width: 900px;
+    min-height: 200px;
+    background: white;
+    border-radius: 4px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 20px 60px rgba(0,0,0,0.5);
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  #render-frame {
+    width: 900px;
+    min-height: 200px;
+    border: none;
+    display: block;
+  }
+
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    width: 900px;
+    min-height: 400px;
+    color: var(--muted);
+  }
+  .empty-icon {
+    width: 48px; height: 48px;
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+  }
+  .empty-state p { font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">
+    <div class="logo-dot"></div>
+    Gemini Code → PDF
+  </div>
+  <span class="topbar-sub">Paste code · Render · Export as single long page</span>
+</div>
+
+<div class="layout">
+
+  <div class="left">
+    <div class="panel-title">Gemini-generated code</div>
+    <textarea id="code-input" placeholder="Paste your Gemini AI-generated HTML, CSS, JS, SVG, or any web code here...
+
+The visual output will render on the right →"></textarea>
+    <div class="left-footer">
+      <div class="input-row">
+        <label>File name</label>
+        <input type="text" id="filename" value="gemini-output" placeholder="gemini-output" />
+      </div>
+      <div class="btn-row">
+        <button class="btn-render" id="render-btn" onclick="renderCode()">Render preview</button>
+        <button class="btn-export" id="export-btn" onclick="exportPDF()" disabled>Export PDF</button>
+      </div>
+      <div class="status" id="status"><span class="spinner"></span><span id="status-text">Paste code and click Render.</span></div>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="right-header">
+      <span>Preview</span>
+      <span class="pill" id="size-pill">900 px wide · full height</span>
+    </div>
+    <div class="preview-wrap">
+      <div id="page-canvas">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-icon">&#9633;</div>
+          <p>Your rendered output will appear here</p>
+        </div>
+        <iframe id="render-frame" style="display:none;"></iframe>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const { jsPDF } = window.jspdf;
+
+  function setStatus(msg, type) {
+    const el = document.getElementById('status');
+    const txt = document.getElementById('status-text');
+    el.className = 'status ' + (type || '');
+    txt.textContent = msg;
+  }
+
+  function renderCode() {
+    const code = document.getElementById('code-input').value.trim();
+    if (!code) { setStatus('Nothing to render — paste some code first.', 'err'); return; }
+
+    setStatus('Rendering…', 'busy');
+
+    const frame = document.getElementById('render-frame');
+    const empty = document.getElementById('empty-state');
+
+    let html;
+    if (/<!doctype|<html/i.test(code)) {
+      html = code;
+    } else {
+      html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; }
+</style>
+</head>
+<body>${code}</body>
+</html>`;
+    }
+
+    frame.onload = () => {
+      empty.style.display = 'none';
+      frame.style.display = 'block';
+
+      // Auto-size iframe to full content height — no fixed page size
+      try {
+        const h = frame.contentDocument.documentElement.scrollHeight;
+        frame.style.height = h + 'px';
+        document.getElementById('page-canvas').style.minHeight = h + 'px';
+        document.getElementById('size-pill').textContent = `900 × ${h} px`;
+      } catch(e) {}
+
+      setStatus('Rendered. Ready to export.', 'ok');
+      document.getElementById('export-btn').disabled = false;
+    };
+
+    frame.srcdoc = html;
+  }
+
+  async function exportPDF() {
+    const frame = document.getElementById('render-frame');
+    if (!frame || frame.style.display === 'none') {
+      setStatus('Render the code first.', 'err');
+      return;
+    }
+
+    setStatus('Capturing screenshot…', 'busy');
+    document.getElementById('export-btn').disabled = true;
+
+    try {
+      const scrollH = frame.contentDocument
+        ? frame.contentDocument.documentElement.scrollHeight
+        : 600;
+
+      const captureH = Math.max(100, scrollH);
+
+      const canvas = await html2canvas(
+        frame.contentDocument ? frame.contentDocument.documentElement : frame,
+        {
+          useCORS: true,
+          scale: 2,
+          width: 900,
+          height: captureH,
+          windowWidth: 900,
+          windowHeight: captureH,
+          logging: false,
+          backgroundColor: '#ffffff'
+        }
+      );
+
+      setStatus('Building PDF…', 'busy');
+
+      // ── Single page: width = 900px at 72dpi = 648pt, height scales proportionally ──
+      const pdfW = 648; // pt  (9 inches × 72)
+      // Scale canvas pixels → PDF points
+      // canvas.width = 900 * scale = 1800 device px
+      const scale = pdfW / canvas.width;         // pt per device-px
+      const pdfH  = Math.round(canvas.height * scale); // proportional height in pt
+
+      const pdf = new jsPDF({
+        unit: 'pt',
+        format: [pdfW, pdfH],
+        orientation: 'portrait'
+      });
+
+      const fname = (document.getElementById('filename').value.trim() || 'gemini-output');
+
+      // White background
+      pdf.setFillColor(255, 255, 255);
+      pdf.rect(0, 0, pdfW, pdfH, 'F');
+
+      // Place the full canvas as the one and only page
+      const imgData = canvas.toDataURL('image/png');
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfW, pdfH);
+
+      pdf.save(fname + '.pdf');
+      setStatus('PDF saved: ' + fname + '.pdf', 'ok');
+    } catch(e) {
+      setStatus('Export failed: ' + e.message, 'err');
+      console.error(e);
+    } finally {
+      document.getElementById('export-btn').disabled = false;
+    }
+  }
+
+  document.getElementById('code-input').addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') renderCode();
+  });
+</script>
+</body>
+</html>
