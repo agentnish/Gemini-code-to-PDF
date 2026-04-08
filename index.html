@@ -370,65 +370,99 @@ The visual output will render at 9 × 11 inches on the right →"></textarea>
     document.getElementById('export-btn').disabled = true;
 
     try {
-      const target = frame.contentDocument
-        ? frame.contentDocument.body
-        : frame;
-
       // Scroll height for full capture
       const scrollH = frame.contentDocument
         ? frame.contentDocument.documentElement.scrollHeight
         : 1100;
 
+      const captureH = Math.max(1100, scrollH);
+
       const canvas = await html2canvas(
         frame.contentDocument ? frame.contentDocument.documentElement : frame,
         {
           useCORS: true,
-          scale: 2,           // 2× for crisp quality
+          scale: 2,
           width: 900,
-          height: Math.max(1100, scrollH),
+          height: captureH,
           windowWidth: 900,
-          windowHeight: Math.max(1100, scrollH),
-          logging: false
+          windowHeight: captureH,
+          logging: false,
+          backgroundColor: '#ffffff'
         }
       );
 
       setStatus('Building PDF…', 'busy');
 
-      // 9 × 11 inches in points (72pt/in)
-      const pageW = 9 * 72;   // 648
-      const pageH = 11 * 72;  // 792
+      // ── Page dimensions (points: 72pt = 1in) ──
+      const pageW   = 9  * 72;   // 648 pt wide
+      const pageH   = 11 * 72;   // 792 pt tall
 
-      const imgData = canvas.toDataURL('image/png');
-      const imgW = canvas.width;
-      const imgH = canvas.height;
+      // ── Margins (pt) ──
+      const marginTop    = 36;   // 0.5 in
+      const marginBottom = 36;   // 0.5 in
+      const marginSide   = 36;   // 0.5 in
 
-      // Scale image to fit 9in width; if taller than 11in, multi-page
-      const ratio = imgW / (pageW);          // px per pt
-      const renderedH = imgH / ratio;        // total height in pts
-      const numPages = Math.ceil(renderedH / pageH);
+      // Footer strip height at bottom of each page (pt)
+      const footerH = 20;
+
+      // Content area per page (pt)
+      const contentW = pageW - marginSide * 2;
+      const contentH = pageH - marginTop - marginBottom - footerH;
+
+      // ── Scale: fit content width into the page content area ──
+      // canvas.width is in device pixels (scale:2 so = 900*2 = 1800)
+      const pxPerPt   = canvas.width / contentW;   // device-px per PDF pt
+      const contentPx = contentH * pxPerPt;         // device-px of usable height per page
+
+      const numPages = Math.ceil(canvas.height / contentPx);
 
       const pdf = new jsPDF({ unit: 'pt', format: [pageW, pageH], orientation: 'portrait' });
+      const fname = (document.getElementById('filename').value.trim() || 'gemini-output');
 
       for (let i = 0; i < numPages; i++) {
         if (i > 0) pdf.addPage([pageW, pageH]);
 
-        // Slice canvas for this page
+        // ── White page background ──
+        pdf.setFillColor(255, 255, 255);
+        pdf.rect(0, 0, pageW, pageH, 'F');
+
+        // ── Slice the canvas for this page ──
+        const srcY    = Math.round(i * contentPx);
+        const srcH    = Math.min(Math.round(contentPx), canvas.height - srcY);
+        const destH   = srcH / pxPerPt;   // pt height of this slice
+
+        if (srcH <= 0) continue;
+
         const sliceCanvas = document.createElement('canvas');
-        sliceCanvas.width = imgW;
-        const sliceH = Math.min(imgH, Math.round(pageH * ratio));
-        sliceCanvas.height = sliceH;
+        sliceCanvas.width  = canvas.width;
+        sliceCanvas.height = srcH;
         const ctx = sliceCanvas.getContext('2d');
-        ctx.drawImage(canvas, 0, i * sliceH, imgW, sliceH, 0, 0, imgW, sliceH);
+
+        // White background behind the slice (handles transparent areas)
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+        ctx.drawImage(canvas, 0, srcY, canvas.width, srcH, 0, 0, canvas.width, srcH);
 
         const sliceData = sliceCanvas.toDataURL('image/png');
-        const actualH = sliceH / ratio;
-        pdf.addImage(sliceData, 'PNG', 0, 0, pageW, actualH);
+
+        // Place image inside the margin area
+        pdf.addImage(sliceData, 'PNG', marginSide, marginTop, contentW, destH);
+
+        // ── Footer: thin rule + page number ──
+        const footerY = pageH - marginBottom - footerH + 8;
+        pdf.setDrawColor(210, 210, 215);
+        pdf.setLineWidth(0.5);
+        pdf.line(marginSide, footerY - 4, pageW - marginSide, footerY - 4);
+
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(8);
+        pdf.setTextColor(160, 160, 168);
+        pdf.text(fname, marginSide, footerY + 6);
+        pdf.text(`${i + 1} / ${numPages}`, pageW - marginSide, footerY + 6, { align: 'right' });
       }
 
-      const fname = (document.getElementById('filename').value.trim() || 'gemini-output') + '.pdf';
-      pdf.save(fname);
-
-      setStatus('PDF saved: ' + fname, 'ok');
+      pdf.save(fname + '.pdf');
+      setStatus('PDF saved: ' + fname + '.pdf', 'ok');
     } catch(e) {
       setStatus('Export failed: ' + e.message, 'err');
       console.error(e);
